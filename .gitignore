@@ -56,5 +56,5 @@ buck-out/
 #
 .env
 
-.o
-.d
+*.o
+*.d
