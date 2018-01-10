@@ -41,7 +41,15 @@ DEFINES =
 
 include ../gcc.mk
 
+ifeq ($(OS),Windows_NT)
+    detected_OS := Windows
+else
+    detected_OS := $(shell uname -s)
+endif
+
 GCC_VER_GTE44 := $(shell echo `gcc -dumpversion | cut -f1-2 -d.` \< 4.4 | bc )
 ifeq ($(GCC_VER_GTE44),1)
+ifeq ($(detected_OS), Linux)
 CFLAGS += -march=i586
+endif
 endif
