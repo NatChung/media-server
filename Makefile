@@ -7,6 +7,7 @@ all:
 	#$(MAKE) -C librtsp
 	#$(MAKE) -C libmov
 	#$(MAKE) -C libdash
+	$(MAKE) -C src
 	
 clean:
 	#$(MAKE) -C libflv clean
@@ -17,3 +18,4 @@ clean:
 	#$(MAKE) -C librtsp clean
 	#$(MAKE) -C libmov clean
 	#$(MAKE) -C libdash clean
+	$(MAKE) -C src clean

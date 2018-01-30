@@ -1,5 +1,5 @@
 // ITU-T H.222.0(10/2014)
-// Information technology ¨C Generic coding of moving pictures and associated audio information: Systems
+// Information technology ï¿½C Generic coding of moving pictures and associated audio information: Systems
 // 2.4.4.3 Program association table(p65)
 
 #include "mpeg-ts-proto.h"
@@ -8,7 +8,7 @@
 
 size_t pat_read(const uint8_t* data, size_t bytes, pat_t *pat)
 {
-	// Table 2-30 ¨C Program association section(p65)
+	// Table 2-30 ï¿½C Program association section(p65)
 
 	uint32_t i = 0;
 	uint32_t j = 0;
@@ -47,13 +47,13 @@ size_t pat_read(const uint8_t* data, size_t bytes, pat_t *pat)
 	//assert(i+4 == bytes);
 	//crc = (data[i] << 24) | (data[i+1] << 16) | (data[i+2] << 8) | data[i+3];
 	//crc = crc32(-1, data, bytes-4);
-	assert(0 == crc32(0xffffffff, data, section_length+3));
+	// assert(0 == crc32(0xffffffff, data, section_length+3));
 	return 0;
 }
 
 size_t pat_write(const pat_t *pat, uint8_t *data)
 {
-	// Table 2-30 ¨C Program association section(p65)
+	// Table 2-30 ï¿½C Program association section(p65)
 
 	uint32_t i = 0;
 	uint32_t len = 0;

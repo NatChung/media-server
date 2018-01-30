@@ -1,5 +1,5 @@
 // ITU-T H.222.0(10/2014)
-// Information technology ¨C Generic coding of moving pictures and associated audio information: Systems
+// Information technology ï¿½C Generic coding of moving pictures and associated audio information: Systems
 // 2.4.4.8 Program map table(p68)
 
 #include "mpeg-ts-proto.h"
@@ -67,7 +67,7 @@ size_t pmt_read(const uint8_t* data, size_t bytes, pmt_t *pmt)
 	i += j;
 	//assert(i+4 == bytes);
 	//crc = (data[i] << 24) | (data[i+1] << 16) | (data[i+2] << 8) | data[i+3];
-	assert(0 == crc32((unsigned int)(-1), data, section_length+3));
+	// assert(0 == crc32((unsigned int)(-1), data, section_length+3));
 	return 0;
 }
 
