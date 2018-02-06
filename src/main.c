@@ -12,16 +12,12 @@
 #include "mpeg-ts-proto.h"
 #include "rtp-profile.h"
 
-#include "b64.h"
-#include "audio.h"
-
-
 #define RECV_BUFFER_SIZE 32768
 #define TS_PACKET_SIZE 188
 
-#define GSSC_STREAM_PORT    12345
-#define RTP_PORT            10000
-#define AUDIO_BRIDGE_PORT   43347
+unsigned short gAudioPort = 0;
+unsigned short gVideoPort = 0;
+unsigned short gTsPort = 0;
 
 typedef struct{
     int fd;
@@ -44,9 +40,6 @@ uint32_t createAudioTimestamp(RTP_HANDLER *rtpHandler, size_t bytes){
     return rtpHandler->audioTimestamp;
 }
 
-#define BUFFER 2048
-unsigned char audioBuffer[BUFFER] = {0};
-int readIndex = 0, writeIndex = 0, count = 0;
 
 static void ts_packet(void* param, int avtype, int64_t pts, int64_t dts, void* data, size_t bytes)
 {
@@ -85,16 +78,14 @@ static struct sockaddr_in getLocalAddr(unsigned short port){
 static void rtp_audio_encode_packet(void* param, const void *packet, int bytes, uint32_t timestamp, int flags)
 {
     RTP_HANDLER *rtpHandler = (RTP_HANDLER *)param;
-    struct sockaddr_in addr = getLocalAddr(22347);
+    struct sockaddr_in addr = getLocalAddr(gAudioPort);
     sendto(rtpHandler->fd, packet, bytes, 0, (struct sockaddr *)&addr, sizeof(addr));
 }
 
 static void rtp_video_encode_packet(void* param, const void *packet, int bytes, uint32_t timestamp, int flags)
 {
     RTP_HANDLER *rtpHandler = (RTP_HANDLER *)param;
-    struct sockaddr_in addr = getLocalAddr(12347);
-    if(bytes > 1450)
-        printf("\n Sent bytes = %d", bytes);
+    struct sockaddr_in addr = getLocalAddr(gVideoPort);
     sendto(rtpHandler->fd, packet, bytes, 0, (struct sockaddr *)&addr, sizeof(addr));
 }
 
@@ -103,14 +94,14 @@ void initAudioHandler(struct rtp_payload_t *audioHandler, RTP_HANDLER *rtpHandle
     audioHandler->alloc = rtp_alloc;
 	audioHandler->free = rtp_free;
 	audioHandler->packet = rtp_audio_encode_packet;
-    rtpHandler->audioEncoder = rtp_payload_encode_create(RTP_PAYLOAD_PCMU, "PCMU", 1, 1724854, audioHandler, rtpHandler);
+    rtpHandler->audioEncoder = rtp_payload_encode_create(RTP_PAYLOAD_PCMU, "PCMU", 1, gAudioPort, audioHandler, rtpHandler);
 }
 
 void initVideoHandler(struct rtp_payload_t *videoHandler, RTP_HANDLER *rtpHandler){
     videoHandler->alloc = rtp_alloc;
 	videoHandler->free = rtp_free;
 	videoHandler->packet = rtp_video_encode_packet;
-    rtpHandler->videoEncoder = rtp_payload_encode_create(RTP_PAYLOAD_H264, "H264", 1, 621539, videoHandler, rtpHandler);
+    rtpHandler->videoEncoder = rtp_payload_encode_create(RTP_PAYLOAD_H264, "H264", 1, gVideoPort, videoHandler, rtpHandler);
 }
 
 void initRtpHandler(RTP_HANDLER *rtpHandler){
@@ -122,79 +113,56 @@ void initRtpHandler(RTP_HANDLER *rtpHandler){
 
 
 extern int open_udp_server_socket(int local_port);
+
+int usage(int argc, char *argv[]){
+    for(int i=1;i<argc;i++){
+        char *parameter = argv[i];
+        if(parameter[0] != '-') continue;
+
+        if(strcmp(parameter, '-t') == 0){
+            gTsPort = atoi(parameter);
+        }
+        else if(strcmp(parameter, '-a') == 0){
+            gAudioPort = atoi(parameter);
+        }
+        else if(strcmp(parameter, '-v') == 0){
+            gVideoPort = atoi(parameter);
+        }
+    }
+
+    if(gTsPort == 0 || gAudioPort == 0 || gVideoPort == 0){
+        printf("Command Error !\nUsage: command -t [MpegTs source port] -a [RTP audio target port] -v [RTP video target port]\n");
+        exit(0);
+    }
+}
+
 int main(int argc, char *argv[]){
 
     struct sockaddr * from;
     socklen_t fromLen;
-    char rxData[RECV_BUFFER_SIZE], audioData[RECV_BUFFER_SIZE];
+    char rxData[RECV_BUFFER_SIZE];
     RTP_HANDLER rtpHandler;
-    struct timeval tv;
-    int fd_max, rtpFd, audioBridgeFd;
-    fd_set rfds;
-
+    int rlen, tsCount;
+    
+    usage(argc, argv);
     initRtpHandler(&rtpHandler);
-
-    // FILE *f = fopen("/Users/jeffrey/Desktop/audio.mulaw", "w+");
-    // if (f == NULL)
-    // {
-    //     printf("Error opening file!\n");
-    //     exit(1);
-    // }
-
     struct rtp_payload_t audioHandler;
     initAudioHandler(&audioHandler, &rtpHandler);
-
     struct rtp_payload_t videoHandler;
     initVideoHandler(&videoHandler, &rtpHandler);
 
-    rtpHandler.fd = open_udp_server_socket(GSSC_STREAM_PORT);
-    rtpFd = open_udp_server_socket(RTP_PORT);
-    fd_max = (rtpFd > rtpHandler.fd) ? rtpFd : rtpHandler.fd;
+    rtpHandler.fd = open_udp_server_socket(gTsPort);
+    if(rtpHandler.fd <=0){
+        fprintf(stderr,"Create mpeg ts source socket failed");
+        exit(0);
+    }
 
-    audioBridgeFd = open_udp_server_socket(AUDIO_BRIDGE_PORT);
-    fd_max = (fd_max > audioBridgeFd) ? fd_max : audioBridgeFd;
+    while(1){
+        rlen = recvfrom(rtpHandler.fd, rxData, RECV_BUFFER_SIZE, 0, from, &fromLen);
+        if(rlen <= 0) continue;
 
-    SendAudioCommand(audioBridgeFd, 1, 0);
-
-   
-    
-    while(1)
-    {
-        tv.tv_sec = 1 ;         //all these four items must be inside of the for loop
-        tv.tv_usec = 0 ;
-        
-        FD_ZERO(&rfds);
-        FD_SET(rtpHandler.fd, &rfds);
-        FD_SET(rtpFd, &rfds);
-        FD_SET(audioBridgeFd, &rfds);
-        
-        if( select(fd_max +5, &rfds, NULL, NULL, &tv) > 0 )
-        {
-            if(FD_ISSET(rtpHandler.fd, &rfds) )
-            {
-                fromLen = sizeof(from);
-                int rlen = recvfrom(rtpHandler.fd, rxData, RECV_BUFFER_SIZE, 0, from, &fromLen);
-                int tsCount = rlen/TS_PACKET_SIZE;
-                for(int i=0;i<tsCount;i++){
-                    mpeg_ts_packet_dec(rxData +(i*TS_PACKET_SIZE), TS_PACKET_SIZE, ts_packet, &rtpHandler);
-                }
-            }
-            else if(FD_ISSET(rtpFd, &rfds)){
-                fromLen = sizeof(from);
-                int rlen = recvfrom(rtpFd, rxData, RECV_BUFFER_SIZE, 0, from, &fromLen);
-                printf("\n Data port/1000, rlen=%d", rlen);
-            }
-            else if(FD_ISSET(audioBridgeFd, &rfds)){
-                fromLen = sizeof(from);
-                int rlen = recvfrom(audioBridgeFd, rxData, RECV_BUFFER_SIZE, 0, from, &fromLen);
-                if(rlen <= 0) continue;
-
-                size_t decodeLen = 0;
-                char *adata = b64_decode_ex(rxData, rlen, &decodeLen);
-                printf("dlen = %d\n", decodeLen);
-                SendAudioData(audioBridgeFd, adata, 0);
-                //fwrite(adata,1,800,f);
-            }
+        for(int i=0;i<(rlen/TS_PACKET_SIZE);i++){
+            mpeg_ts_packet_dec(rxData +(i*TS_PACKET_SIZE), TS_PACKET_SIZE, ts_packet, &rtpHandler);
         }
     }
 
