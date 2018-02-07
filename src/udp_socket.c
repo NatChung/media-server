@@ -6,7 +6,7 @@
 #include <sys/time.h>
 #include <arpa/inet.h>
 
-int open_udp_server_socket(int local_port)
+int open_udp_server_socket(int *local_port)
 {
 	struct sockaddr_in my_addr ;
 	int udp_fd = -1, tmp;
@@ -17,29 +17,21 @@ int open_udp_server_socket(int local_port)
 		printf("open socket fail!\n");
 		goto fail;
 	}
-	
-	
+
 	my_addr.sin_family = AF_INET;
 	my_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-	my_addr.sin_port = htons(local_port);
-    //printf("\n\n open udp port is %d\n\n",htons(local_port));
+	my_addr.sin_port = htons(*local_port);
 	if (bind(udp_fd,(struct sockaddr *)&my_addr, sizeof(my_addr)) < 0) 
 	{
-		printf("bind %d fail\n", local_port);
+		printf("bind %d fail\n", *local_port);
 		goto fail;
 	}
 
-// 	int buff_size;
-// 	int size = sizeof(buff_size);
+	struct sockaddr_in sin;
+	socklen_t len = sizeof(sin);
+	if (getsockname(udp_fd, (struct sockaddr *)&sin, &len) != -1)
+    	*local_port = ntohs(sin.sin_port);
 
-// 	getsockopt(udp_fd,SOL_SOCKET,SO_SNDBUF,(char*)&size,sizeof(size));
-	
-// 	/* limit the tx buf size to limit latency */
-// #define UDP_TX_BUF_SIZE 85600
-// 	tmp = UDP_TX_BUF_SIZE;
-// 	if (setsockopt(udp_fd, SOL_SOCKET, SO_SNDBUF, &tmp, sizeof(tmp)) < 0) {
-// 		goto fail;
-// 	}
 	
 	return udp_fd ;
 	

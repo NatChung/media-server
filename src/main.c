@@ -17,7 +17,6 @@
 
 unsigned short gAudioPort = 0;
 unsigned short gVideoPort = 0;
-unsigned short gTsPort = 0;
 
 typedef struct{
     int fd;
@@ -112,25 +111,22 @@ void initRtpHandler(RTP_HANDLER *rtpHandler){
 }
 
 
-extern int open_udp_server_socket(int local_port);
+extern int open_udp_server_socket(int *local_port);
 
 int usage(int argc, char *argv[]){
     for(int i=1;i<argc;i++){
         char *parameter = argv[i];
         if(parameter[0] != '-') continue;
 
-        if(strcmp(parameter, '-t') == 0){
-            gTsPort = atoi(parameter);
+        if(strcmp(parameter, "-a") == 0){
+            gAudioPort = atoi(argv[i+1]);
         }
-        else if(strcmp(parameter, '-a') == 0){
-            gAudioPort = atoi(parameter);
-        }
-        else if(strcmp(parameter, '-v') == 0){
-            gVideoPort = atoi(parameter);
+        else if(strcmp(parameter, "-v") == 0){
+            gVideoPort = atoi(argv[i+1]);
         }
     }
 
-    if(gTsPort == 0 || gAudioPort == 0 || gVideoPort == 0){
+    if(gAudioPort == 0 || gVideoPort == 0){
         printf("Command Error !\nUsage: command -t [MpegTs source port] -a [RTP audio target port] -v [RTP video target port]\n");
         exit(0);
     }
@@ -143,19 +139,22 @@ int main(int argc, char *argv[]){
     char rxData[RECV_BUFFER_SIZE];
     RTP_HANDLER rtpHandler;
     int rlen, tsCount;
+    int localPort = 0;
     
     usage(argc, argv);
     initRtpHandler(&rtpHandler);
+
     struct rtp_payload_t audioHandler;
     initAudioHandler(&audioHandler, &rtpHandler);
     struct rtp_payload_t videoHandler;
     initVideoHandler(&videoHandler, &rtpHandler);
 
-    rtpHandler.fd = open_udp_server_socket(gTsPort);
+    rtpHandler.fd = open_udp_server_socket(&localPort);
     if(rtpHandler.fd <=0){
         fprintf(stderr,"Create mpeg ts source socket failed");
         exit(0);
     }
+    printf("%d", localPort);
 
     while(1){
         rlen = recvfrom(rtpHandler.fd, rxData, RECV_BUFFER_SIZE, 0, from, &fromLen);
