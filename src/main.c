@@ -140,6 +140,7 @@ int main(int argc, char *argv[]){
     RTP_HANDLER rtpHandler;
     int rlen, tsCount;
     int localPort = 0;
+
     
     usage(argc, argv);
     initRtpHandler(&rtpHandler);
@@ -154,7 +155,7 @@ int main(int argc, char *argv[]){
         fprintf(stderr,"Create mpeg ts source socket failed");
         exit(0);
     }
-    printf("%d", localPort);
+    fprintf(stderr, "{\"listen\":%d}", localPort);
 
     while(1){
         rlen = recvfrom(rtpHandler.fd, rxData, RECV_BUFFER_SIZE, 0, from, &fromLen);
