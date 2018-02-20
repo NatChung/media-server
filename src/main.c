@@ -155,7 +155,7 @@ int main(int argc, char *argv[]){
         fprintf(stderr,"Create mpeg ts source socket failed");
         exit(0);
     }
-    fprintf(stderr, "{\"listen\":%d}", localPort);
+    fprintf(stderr, "{\"listen\":%d}", localPort);//Must keep here for parent node js to get localPort
 
     while(1){
         rlen = recvfrom(rtpHandler.fd, rxData, RECV_BUFFER_SIZE, 0, from, &fromLen);
