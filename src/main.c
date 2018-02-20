@@ -1,32 +1,22 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
+
 #include <netinet/in.h>
 #include <string.h>
 #include <sys/time.h>
 #include <arpa/inet.h>
-#include <assert.h>
+
+#include "rtp_handler.h"
 
 #include "mpeg-ts.h"
-#include "rtp-payload.h"
 #include "mpeg-ts-proto.h"
-#include "rtp-profile.h"
+
 
 #define RECV_BUFFER_SIZE 32768
 #define TS_PACKET_SIZE 188
 
 unsigned short gAudioPort = 0;
 unsigned short gVideoPort = 0;
-
-typedef struct{
-    int fd;
-    void *videoEncoder;
-    void *audioEncoder;
-    uint32_t videoTimestamp;
-    int64_t videoLastPts;
-    uint32_t audioTimestamp;
-    int64_t audioLastPts;
-}RTP_HANDLER;
 
 uint32_t createVideoTimestamp(RTP_HANDLER *rtpHandler, int64_t pts){
     rtpHandler->videoTimestamp += pts - rtpHandler->videoLastPts;
@@ -38,7 +28,6 @@ uint32_t createAudioTimestamp(RTP_HANDLER *rtpHandler, size_t bytes){
     rtpHandler->audioTimestamp += bytes;
     return rtpHandler->audioTimestamp;
 }
-
 
 static void ts_packet(void* param, int avtype, int64_t pts, int64_t dts, void* data, size_t bytes)
 {
@@ -54,62 +43,6 @@ static void ts_packet(void* param, int avtype, int64_t pts, int64_t dts, void* d
     }
 
 }
-
-static void* rtp_alloc(void* param, int bytes)
-{
-	static uint8_t buffer[2 * 1024 * 1024 + 4] = { 0, 0, 0, 1, };
-	assert(bytes <= sizeof(buffer) - 4);
-	return buffer + 4;
-}
-
-static void rtp_free(void* param, void * packet)
-{
-}
-
-static struct sockaddr_in getLocalAddr(unsigned short port){
-     struct sockaddr_in addr;
-    addr.sin_family = AF_INET ;
-	addr.sin_addr.s_addr = 0x0100007f;
-	addr.sin_port = htons(port) ;
-    return addr;
-}
-
-static void rtp_audio_encode_packet(void* param, const void *packet, int bytes, uint32_t timestamp, int flags)
-{
-    RTP_HANDLER *rtpHandler = (RTP_HANDLER *)param;
-    struct sockaddr_in addr = getLocalAddr(gAudioPort);
-    sendto(rtpHandler->fd, packet, bytes, 0, (struct sockaddr *)&addr, sizeof(addr));
-}
-
-static void rtp_video_encode_packet(void* param, const void *packet, int bytes, uint32_t timestamp, int flags)
-{
-    RTP_HANDLER *rtpHandler = (RTP_HANDLER *)param;
-    struct sockaddr_in addr = getLocalAddr(gVideoPort);
-    sendto(rtpHandler->fd, packet, bytes, 0, (struct sockaddr *)&addr, sizeof(addr));
-}
-
-
-void initAudioHandler(struct rtp_payload_t *audioHandler, RTP_HANDLER *rtpHandler){
-    audioHandler->alloc = rtp_alloc;
-	audioHandler->free = rtp_free;
-	audioHandler->packet = rtp_audio_encode_packet;
-    rtpHandler->audioEncoder = rtp_payload_encode_create(RTP_PAYLOAD_PCMU, "PCMU", 1, gAudioPort, audioHandler, rtpHandler);
-}
-
-void initVideoHandler(struct rtp_payload_t *videoHandler, RTP_HANDLER *rtpHandler){
-    videoHandler->alloc = rtp_alloc;
-	videoHandler->free = rtp_free;
-	videoHandler->packet = rtp_video_encode_packet;
-    rtpHandler->videoEncoder = rtp_payload_encode_create(RTP_PAYLOAD_H264, "H264", 1, gVideoPort, videoHandler, rtpHandler);
-}
-
-void initRtpHandler(RTP_HANDLER *rtpHandler){
-    rtpHandler->videoTimestamp = 0;
-    rtpHandler->videoLastPts = 0;
-    rtpHandler->audioTimestamp = 0;
-    rtpHandler->audioLastPts = 0;
-}
-
 
 extern int open_udp_server_socket(int *local_port);
 
