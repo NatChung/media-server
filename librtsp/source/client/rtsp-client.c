@@ -22,6 +22,8 @@ struct rtsp_client_t* rtsp_client_create(const char* uri, const char* usr, const
 
 	rtsp->parser = rtsp_parser_create(RTSP_PARSER_CLIENT);
 	memcpy(&rtsp->handler, handler, sizeof(rtsp->handler));
+	rtsp->rtp.onrtp = rtsp->handler.onrtp;
+	rtsp->rtp.param = param;
 	rtsp->state = RTSP_INIT;
 	rtsp->param = param;
 	rtsp->cseq = 1;
@@ -83,22 +85,23 @@ int rtsp_client_input(struct rtsp_client_t *rtsp, const void* data, size_t bytes
 
 	do
 	{
-		if (*p == '$' || 0 != rtsp->rtp.state)
+		if (0 == rtsp->parser_need_more_data && (*p == '$' || 0 != rtsp->rtp.state))
 		{
-			p = rtp_over_rtsp(rtsp, p, end);
+			p = rtp_over_rtsp(&rtsp->rtp, p, end);
 		}
 		else
 		{
 			remain = (int)(end - p);
 			r = rtsp_parser_input(rtsp->parser, p, &remain);
+			rtsp->parser_need_more_data = r;
 			assert(r <= 1); // 1-need more data
 			if (0 == r)
 			{
 				r = rtsp_client_handle(rtsp, rtsp->parser);
 				rtsp_parser_clear(rtsp->parser); // reset parser
 				assert((size_t)remain < bytes);
-				p = end - remain;
 			}
+			p = end - remain;
 		}
 	} while (p < end && r >= 0);
 

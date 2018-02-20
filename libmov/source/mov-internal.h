@@ -4,6 +4,8 @@
 #include "mov-box.h"
 #include "mov-atom.h"
 #include "mov-format.h"
+#include "mov-buffer.h"
+#include "mov-ioutil.h"
 
 #define MOV_TAG(a, b, c, d) (((a) << 24) | ((b) << 16) | ((c) << 8) | (d))
 
@@ -170,7 +172,7 @@ struct mov_track_t
 
 struct mov_t
 {
-	void* fp;
+	struct mov_ioutil_t io;
 	
 	struct mov_ftyp_t ftyp;
 	struct mov_mvhd_t mvhd;
@@ -206,6 +208,7 @@ int mov_read_cslg(struct mov_t* mov, const struct mov_box_t* box);
 int mov_read_stss(struct mov_t* mov, const struct mov_box_t* box);
 int mov_read_avcc(struct mov_t* mov, const struct mov_box_t* box);
 int mov_read_hvcc(struct mov_t* mov, const struct mov_box_t* box);
+int mov_read_tx3g(struct mov_t* mov, const struct mov_box_t* box);
 int mov_read_trex(struct mov_t* mov, const struct mov_box_t* box);
 int mov_read_leva(struct mov_t* mov, const struct mov_box_t* box);
 int mov_read_tfhd(struct mov_t* mov, const struct mov_box_t* box);
@@ -220,6 +223,8 @@ size_t mov_write_tkhd(const struct mov_t* mov);
 size_t mov_write_hdlr(const struct mov_t* mov);
 size_t mov_write_vmhd(const struct mov_t* mov);
 size_t mov_write_smhd(const struct mov_t* mov);
+size_t mov_write_nmhd(const struct mov_t* mov);
+size_t mov_write_sthd(const struct mov_t* mov);
 size_t mov_write_dinf(const struct mov_t* mov);
 size_t mov_write_dref(const struct mov_t* mov);
 size_t mov_write_elst(const struct mov_t* mov);
@@ -233,6 +238,7 @@ size_t mov_write_stsz(const struct mov_t* mov);
 size_t mov_write_esds(const struct mov_t* mov);
 size_t mov_write_avcc(const struct mov_t* mov);
 size_t mov_write_hvcc(const struct mov_t* mov);
+size_t mov_write_tx3g(const struct mov_t* mov);
 size_t mov_write_trex(const struct mov_t* mov);
 size_t mov_write_tfhd(const struct mov_t* mov);
 size_t mov_write_trun(const struct mov_t* mov, uint32_t flags, uint32_t flags0, size_t from, size_t count);
@@ -241,7 +247,7 @@ size_t mov_write_styp(const struct mov_t* mov);
 
 struct mov_track_t* mov_track_find(const struct mov_t* mov, uint32_t track);
 
-void mov_write_size(void* fp, uint64_t offset, size_t size);
+void mov_write_size(const struct mov_t* mov, uint64_t offset, size_t size);
 
 size_t mov_stco_size(const struct mov_track_t* track, uint64_t offset);
 

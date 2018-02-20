@@ -1,5 +1,4 @@
 #include "mov-reader.h"
-#include "file-reader.h"
 #include "mov-internal.h"
 #include <errno.h>
 #include <stdio.h>
@@ -30,14 +29,16 @@ static int mov_sample_seek(struct mov_track_t* track, int64_t timestamp);
 // 8.1.1 Media Data Box (p28)
 static int mov_read_mdat(struct mov_t* mov, const struct mov_box_t* box)
 {
-	return file_reader_skip(mov->fp, box->size);
+	mov_buffer_skip(&mov->io, box->size);
+	return mov_buffer_error(&mov->io);
 }
 
 // 8.1.2 Free Space Box (p28)
 static int mov_read_free(struct mov_t* mov, const struct mov_box_t* box)
 {
 	// Container: File or other box
-	return file_reader_skip(mov->fp, box->size);
+	mov_buffer_skip(&mov->io, box->size);
+	return mov_buffer_error(&mov->io);
 }
 
 //static struct mov_stsd_t* mov_track_stsd_find(struct mov_track_t* track, uint32_t sample_description_index)
@@ -54,7 +55,7 @@ static int mov_read_free(struct mov_t* mov, const struct mov_box_t* box)
 static int mov_track_build(struct mov_track_t* track)
 {
 	size_t i, j, k;
-	uint32_t dts_shift;
+	int32_t delta, dts_shift;
 	uint64_t n, chunk_offset;
 	struct mov_stbl_t* stbl = &track->stbl;
 
@@ -109,17 +110,17 @@ static int mov_track_build(struct mov_track_t* track)
 	dts_shift = 0;
 	for (i = 0, n = 0; i < stbl->ctts_count; i++)
 	{
-		if ((int32_t)stbl->ctts[i].sample_delta < 0 
-			&& (int32_t)stbl->ctts[i].sample_delta != -1 // see more cslg box
-			&& dts_shift < (uint32_t)(-(int32_t)stbl->ctts[i].sample_delta))
-			dts_shift = -(int32_t)stbl->ctts[i].sample_delta;
+		delta = (int32_t)stbl->ctts[i].sample_delta;
+		if (delta < 0 && dts_shift > delta && delta != -1 /* see more cslg box*/)
+			dts_shift = delta;
 	}
+	assert(dts_shift <= 0);
 
 	// sample cts/pts
 	for (i = 0, n = 0; i < stbl->ctts_count; i++)
 	{
 		for (j = 0; j < stbl->ctts[i].sample_count; j++, n++)
-			track->samples[n].pts += (int32_t)stbl->ctts[i].sample_delta + dts_shift; // always as int, fixed mp4box delta version error
+			track->samples[n].pts += (int32_t)stbl->ctts[i].sample_delta - dts_shift; // always as int, fixed mp4box delta version error
 	}
 	assert(0 == stbl->ctts_count || n == track->sample_count);
 
@@ -200,16 +201,16 @@ static int mov_read_trak(struct mov_t* mov, const struct mov_box_t* box)
 static int mov_read_dref(struct mov_t* mov, const struct mov_box_t* box)
 {
 	uint32_t i, entry_count;
-	file_reader_r8(mov->fp); /* version */
-	file_reader_rb24(mov->fp); /* flags */
-	entry_count = file_reader_rb32(mov->fp);
+	mov_buffer_r8(&mov->io); /* version */
+	mov_buffer_r24(&mov->io); /* flags */
+	entry_count = mov_buffer_r32(&mov->io);
 
 	for (i = 0; i < entry_count; i++)
 	{
-		uint32_t size = file_reader_rb32(mov->fp);
-		/*uint32_t type = */file_reader_rb32(mov->fp);
-		/*uint32_t vern = */file_reader_rb32(mov->fp); /* version + flags */
-		file_reader_skip(mov->fp, size-12);
+		uint32_t size = mov_buffer_r32(&mov->io);
+		/*uint32_t type = */mov_buffer_r32(&mov->io);
+		/*uint32_t vern = */mov_buffer_r32(&mov->io); /* version + flags */
+		mov_buffer_skip(&mov->io, size-12);
 	}
 
 	(void)box;
@@ -220,9 +221,9 @@ static int mov_read_btrt(struct mov_t* mov, const struct mov_box_t* box)
 {
 	// ISO/IEC 14496-15:2010(E)
 	// 5.3.4 AVC Video Stream Definition (p19)
-	file_reader_rb32(mov->fp); /* bufferSizeDB */
-	file_reader_rb32(mov->fp); /* maxBitrate */
-	file_reader_rb32(mov->fp); /* avgBitrate */
+	mov_buffer_r32(&mov->io); /* bufferSizeDB */
+	mov_buffer_r32(&mov->io); /* maxBitrate */
+	mov_buffer_r32(&mov->io); /* avgBitrate */
 	(void)box;
 	return 0;
 }
@@ -232,15 +233,15 @@ static int mov_read_uuid(struct mov_t* mov, const struct mov_box_t* box)
 	uint8_t usertype[16] = { 0 };
 	if(box->size > 16) 
 	{
-		file_reader_read(mov->fp, usertype, sizeof(usertype));
-		file_reader_skip(mov->fp, box->size - 16);
+		mov_buffer_read(&mov->io, usertype, sizeof(usertype));
+		mov_buffer_skip(&mov->io, box->size - 16);
 	}
-	return 0;
+	return mov_buffer_error(&mov->io);
 }
 
 static int mov_read_moof(struct mov_t* mov, const struct mov_box_t* box)
 {
-	mov->moof_offset = file_reader_tell(mov->fp) - 8 /*box size */;
+	mov->moof_offset = mov_buffer_tell(&mov->io) - 8 /*box size */;
 	return mov_reader_box(mov, box);
 }
 
@@ -248,47 +249,47 @@ static int mov_read_mehd(struct mov_t* mov, const struct mov_box_t* box)
 {
 	unsigned int version;
 	uint64_t fragment_duration;
-	version = file_reader_r8(mov->fp); /* version */
-	file_reader_rb24(mov->fp); /* flags */
+	version = mov_buffer_r8(&mov->io); /* version */
+	mov_buffer_r24(&mov->io); /* flags */
 
 	if (1 == version)
-		fragment_duration = file_reader_rb64(mov->fp); /* fragment_duration*/
+		fragment_duration = mov_buffer_r64(&mov->io); /* fragment_duration*/
 	else
-		fragment_duration = file_reader_rb32(mov->fp); /* fragment_duration*/
+		fragment_duration = mov_buffer_r32(&mov->io); /* fragment_duration*/
 
 	(void)box;
 	assert(fragment_duration <= mov->mvhd.duration);
-	return file_reader_error(mov->fp);
+	return mov_buffer_error(&mov->io);
 }
 
 static int mov_read_mfhd(struct mov_t* mov, const struct mov_box_t* box)
 {
 	(void)box;
-	file_reader_rb32(mov->fp); /* version & flags */
-	file_reader_rb32(mov->fp); /* sequence_number */
-	return file_reader_error(mov->fp);
+	mov_buffer_r32(&mov->io); /* version & flags */
+	mov_buffer_r32(&mov->io); /* sequence_number */
+	return mov_buffer_error(&mov->io);
 }
 
 // 8.8.12 Track fragment decode time (p76)
 static int mov_read_tfdt(struct mov_t* mov, const struct mov_box_t* box)
 {
 	unsigned int version;
-	version = file_reader_r8(mov->fp); /* version */
-	file_reader_rb24(mov->fp); /* flags */
+	version = mov_buffer_r8(&mov->io); /* version */
+	mov_buffer_r24(&mov->io); /* flags */
 	if (1 == version)
-		mov->track->end_dts = file_reader_rb64(mov->fp); /* baseMediaDecodeTime */
+		mov->track->end_dts = mov_buffer_r64(&mov->io); /* baseMediaDecodeTime */
 	else
-		mov->track->end_dts = file_reader_rb32(mov->fp); /* baseMediaDecodeTime */
-	return file_reader_error(mov->fp); (void)box;
+		mov->track->end_dts = mov_buffer_r32(&mov->io); /* baseMediaDecodeTime */
+	return mov_buffer_error(&mov->io); (void)box;
 }
 
 // 8.8.11 Movie Fragment Random Access Offset Box (p75)
 static int mov_read_mfro(struct mov_t* mov, const struct mov_box_t* box)
 {
 	(void)box;
-	file_reader_rb32(mov->fp); /* version & flags */
-	file_reader_rb32(mov->fp); /* size */
-	return file_reader_error(mov->fp);
+	mov_buffer_r32(&mov->io); /* version & flags */
+	mov_buffer_r32(&mov->io); /* size */
+	return mov_buffer_error(&mov->io);
 }
 
 static int mov_read_default(struct mov_t* mov, const struct mov_box_t* box)
@@ -324,11 +325,13 @@ static struct mov_parse_t s_mov_parse_table[] = {
 	{ MOV_TAG('m', 'o', 'o', 'f'), MOV_ROOT, mov_read_moof },
 	{ MOV_TAG('m', 'v', 'e', 'x'), MOV_MOOV, mov_read_default },
 	{ MOV_TAG('m', 'v', 'h', 'd'), MOV_MOOV, mov_read_mvhd },
+	{ MOV_TAG('n', 'm', 'h', 'd'), MOV_MINF, mov_read_default }, // ISO/IEC 14496-12:2015(E) 8.4.5.2 Null Media Header Box (p45)
 	{ MOV_TAG('s', 'i', 'd', 'x'), MOV_ROOT, mov_read_sidx },
 	{ MOV_TAG('s', 'k', 'i', 'p'), MOV_NULL, mov_read_free },
 	{ MOV_TAG('s', 'm', 'h', 'd'), MOV_MINF, mov_read_smhd },
 	{ MOV_TAG('s', 't', 'b', 'l'), MOV_MINF, mov_read_default },
 	{ MOV_TAG('s', 't', 'c', 'o'), MOV_STBL, mov_read_stco },
+	{ MOV_TAG('s', 't', 'h', 'd'), MOV_MINF, mov_read_default }, // ISO/IEC 14496-12:2015(E) 12.6.2 Subtitle media header (p185)
 	{ MOV_TAG('s', 't', 's', 'c'), MOV_STBL, mov_read_stsc },
 	{ MOV_TAG('s', 't', 's', 'd'), MOV_STBL, mov_read_stsd },
 	{ MOV_TAG('s', 't', 's', 's'), MOV_STBL, mov_read_stss },
@@ -356,16 +359,16 @@ int mov_reader_box(struct mov_t* mov, const struct mov_box_t* parent)
 	struct mov_box_t box;
 	int (*parse)(struct mov_t* mov, const struct mov_box_t* box);
 
-	while (bytes + 8 < parent->size && 0 == file_reader_error(mov->fp))
+	while (bytes + 8 < parent->size && 0 == mov_buffer_error(&mov->io))
 	{
 		uint64_t n = 8;
-		box.size = file_reader_rb32(mov->fp);
-		box.type = file_reader_rb32(mov->fp);
+		box.size = mov_buffer_r32(&mov->io);
+		box.type = mov_buffer_r32(&mov->io);
 
 		if (1 == box.size)
 		{
 			// unsigned int(64) largesize
-			box.size = file_reader_rb64(mov->fp);
+			box.size = mov_buffer_r64(&mov->io);
 			n += 8;
 		}
 		else if (0 == box.size)
@@ -400,19 +403,19 @@ int mov_reader_box(struct mov_t* mov, const struct mov_box_t* parent)
 
 		if (NULL == parse)
 		{
-			file_reader_skip(mov->fp, box.size);
+			mov_buffer_skip(&mov->io, box.size);
 		}
 		else
 		{
 			int r;
 			uint64_t pos, pos2;
-			pos = file_reader_tell(mov->fp);
+			pos = mov_buffer_tell(&mov->io);
 			r = parse(mov, &box);
 			assert(0 == r);
 			if (0 != r) return r;
-			pos2 = file_reader_tell(mov->fp);
+			pos2 = mov_buffer_tell(&mov->io);
 			assert(pos2 - pos == box.size);
-			file_reader_skip(mov->fp, box.size - (pos2 - pos));
+			mov_buffer_skip(&mov->io, box.size - (pos2 - pos));
 		}
 	}
 
@@ -450,7 +453,7 @@ static int mov_reader_init(struct mov_t* mov)
 	return 0;
 }
 
-struct mov_reader_t* mov_reader_create(const char* file)
+struct mov_reader_t* mov_reader_create(const struct mov_buffer_t* buffer, void* param)
 {
 	struct mov_reader_t* reader;
 	reader = (struct mov_reader_t*)calloc(1, sizeof(*reader));
@@ -465,8 +468,9 @@ struct mov_reader_t* mov_reader_create(const char* file)
 	reader->mov.ftyp.brands_count = 0;
 	reader->mov.header = 0;
 
-	reader->mov.fp = file_reader_create(file);
-	if (NULL == reader->mov.fp || 0 != mov_reader_init(&reader->mov))
+	reader->mov.io.param = param;
+	memcpy(&reader->mov.io.io, buffer, sizeof(reader->mov.io.io));
+	if (0 != mov_reader_init(&reader->mov))
 	{
 		mov_reader_destroy(reader);
 		return NULL;
@@ -479,7 +483,6 @@ struct mov_reader_t* mov_reader_create(const char* file)
 void mov_reader_destroy(struct mov_reader_t* reader)
 {
 	size_t i;
-	file_reader_destroy(reader->mov.fp);
 	for (i = 0; i < reader->mov.track_count; i++)
 	{
 		FREE(reader->mov.tracks[i].extra_data);
@@ -511,7 +514,7 @@ static struct mov_track_t* mov_reader_next(struct mov_reader_t* reader)
 			continue;
 
 		dts = track2->samples[track2->sample_offset].dts * 1000 / track2->mdhd.timescale;
-		//if (NULL == track || track->samples[track->sample_offset].dts > track2->samples[track2->sample_offset].dts)
+		//if (NULL == track || dts < best_dts)
 		//if (NULL == track || track->samples[track->sample_offset].offset > track2->samples[track2->sample_offset].offset)
 		if (NULL == track || (dts < best_dts && best_dts - dts > AV_TRACK_TIMEBASE) || track2->samples[track2->sample_offset].offset < track->samples[track->sample_offset].offset)
 		{
@@ -539,14 +542,11 @@ int mov_reader_read(struct mov_reader_t* reader, void* buffer, size_t bytes, mov
 	if (bytes < sample->bytes)
 		return ENOMEM;
 
-	if (0 != file_reader_seek(reader->mov.fp, sample->offset))
+	mov_buffer_seek(&reader->mov.io, sample->offset);
+	mov_buffer_read(&reader->mov.io, buffer, sample->bytes);
+	if (mov_buffer_error(&reader->mov.io))
 	{
-		return -1;
-	}
-
-	if (sample->bytes != file_reader_read(reader->mov.fp, buffer, sample->bytes))
-	{
-		return file_reader_error(reader->mov.fp);
+		return mov_buffer_error(&reader->mov.io);
 	}
 
 	track->sample_offset++; //mark as read
@@ -583,7 +583,7 @@ int mov_reader_seek(struct mov_reader_t* reader, int64_t* timestamp)
 	return 0;
 }
 
-int mov_reader_getinfo(struct mov_reader_t* reader, mov_reader_onvideo onvideo, mov_reader_onaudio onaudio, void* param)
+int mov_reader_getinfo(struct mov_reader_t* reader, struct mov_reader_trackinfo_t *ontrack, void* param)
 {
 	size_t i, j;
 	struct mov_stsd_t* stsd;
@@ -598,11 +598,16 @@ int mov_reader_getinfo(struct mov_reader_t* reader, mov_reader_onvideo onvideo, 
 			switch (track->handler_type)
 			{
 			case MOV_VIDEO:
-				onvideo(param, track->tkhd.track_ID, stsd->object_type_indication, stsd->u.visual.width, stsd->u.visual.height, track->extra_data, track->extra_data_size);
+				if(ontrack->onvideo) ontrack->onvideo(param, track->tkhd.track_ID, stsd->object_type_indication, stsd->u.visual.width, stsd->u.visual.height, track->extra_data, track->extra_data_size);
 				break;
 
 			case MOV_AUDIO:
-				onaudio(param, track->tkhd.track_ID, stsd->object_type_indication, stsd->u.audio.channelcount, stsd->u.audio.samplesize, stsd->u.audio.samplerate >> 16, track->extra_data, track->extra_data_size);
+				if (ontrack->onaudio) ontrack->onaudio(param, track->tkhd.track_ID, stsd->object_type_indication, stsd->u.audio.channelcount, stsd->u.audio.samplesize, stsd->u.audio.samplerate >> 16, track->extra_data, track->extra_data_size);
+				break;
+
+			case MOV_SUBT:
+			case MOV_TEXT:
+				if (ontrack->onsubtitle) ontrack->onsubtitle(param, track->tkhd.track_ID, MOV_OBJECT_TEXT, track->extra_data, track->extra_data_size);
 				break;
 
 			default:
