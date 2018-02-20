@@ -7,10 +7,10 @@
 #include <arpa/inet.h>
 
 #include "rtp_handler.h"
+#include "hls_handler.h"
 
 #include "mpeg-ts.h"
 #include "mpeg-ts-proto.h"
-
 
 #define RECV_BUFFER_SIZE 32768
 #define TS_PACKET_SIZE 188
@@ -60,7 +60,7 @@ int usage(int argc, char *argv[]){
     }
 
     if(gAudioPort == 0 || gVideoPort == 0){
-        printf("Command Error !\nUsage: command -t [MpegTs source port] -a [RTP audio target port] -v [RTP video target port]\n");
+        printf("Command Error !\nUsage: command -a [RTP audio target port] -v [RTP video target port]\n");
         exit(0);
     }
 }
@@ -74,7 +74,6 @@ int main(int argc, char *argv[]){
     int rlen, tsCount;
     int localPort = 0;
 
-    
     usage(argc, argv);
     initRtpHandler(&rtpHandler);
 
@@ -90,6 +89,7 @@ int main(int argc, char *argv[]){
     }
     fprintf(stderr, "{\"listen\":%d}", localPort);//Must keep here for parent node js to get localPort
 
+    initMpegTs();
     while(1){
         rlen = recvfrom(rtpHandler.fd, rxData, RECV_BUFFER_SIZE, 0, from, &fromLen);
         if(rlen <= 0) continue;
