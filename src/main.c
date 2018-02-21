@@ -10,6 +10,7 @@
 #include "hls_handler.h"
 #include "mpeg-ts.h"
 #include "mpeg-ts-proto.h"
+#include "pipe_handler.h"
 
 #define RECV_BUFFER_SIZE 32768
 #define TS_PACKET_SIZE 188
@@ -44,10 +45,12 @@ static void ts_packet(void* param, int avtype, int64_t pts, int64_t dts, void* d
     if(avtype == PSI_STREAM_PRIVATE_DATA){
         rtp_payload_encode_input(rtpHandler->audioEncoder, data, bytes, createAudioTimestamp(rtpHandler, bytes));
         // hlsInputUlaw(pts/90, pts/90, data, bytes);
+        sendAudioPipe(data, bytes);
     }
     else if(avtype == PSI_STREAM_H264){
         rtp_payload_encode_input(rtpHandler->videoEncoder, data, bytes, createVideoTimestamp(rtpHandler, pts));
         // hlsInputH264(pts/90, pts/90, data, bytes);
+        sendVideoPipe(data, bytes);
     }
 }
 
@@ -82,6 +85,7 @@ int main(int argc, char *argv[]){
 
     usage(argc, argv);
 
+    initPipe("/tmp");
     // initHls();
     initRtpHandler(&rtpHandler);
     initAudioHandler(&audioHandler, &rtpHandler);
@@ -93,7 +97,6 @@ int main(int argc, char *argv[]){
         exit(0);
     }
     fprintf(stderr, "{\"listen\":%d}", localPort);//Must keep here for parent node js to get localPort
-    
     while(1){
         rlen = recvfrom(rtpHandler.fd, rxData, RECV_BUFFER_SIZE, 0, from, &fromLen);
         if(rlen <= 0) continue;

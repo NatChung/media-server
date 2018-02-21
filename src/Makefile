@@ -1,6 +1,6 @@
 
 all:
-	gcc main.c udp_socket.c rtp_handler.c hls_handler.c g711.c \
+	gcc main.c udp_socket.c rtp_handler.c hls_handler.c g711.c pipe_handler.c \
 	../libhls/debug.linux/libhls.a \
 	../librtp/debug.linux/librtp.a \
 	../libmpeg/debug.linux/libmpeg.a \

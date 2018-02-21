@@ -8,6 +8,7 @@ all:
 	#$(MAKE) -C libmov
 	#$(MAKE) -C libdash
 	$(MAKE) -C src
+	$(MAKE) -C recorder
 	
 clean:
 	#$(MAKE) -C libflv clean
@@ -19,3 +20,4 @@ clean:
 	#$(MAKE) -C libmov clean
 	#$(MAKE) -C libdash clean
 	$(MAKE) -C src clean
+	$(MAKE) -C recorder clean
