@@ -1,126 +1,117 @@
-
-
-
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
+#include <assert.h>
+#include <string.h>
+#include <inttypes.h>  
 
 #include "hls_handler.h"
-#include "faac.h"
-#include "g711.h"
+#include "hls-m3u8.h"
+#include "hls-media.h"
+#include "hls-param.h"
+#include "mpeg-ps.h"
 
-typedef unsigned long   ULONG;
-typedef unsigned int    UINT;
-typedef unsigned char   BYTE;
-typedef char            _TCHAR;
-typedef struct{
-    faacEncHandle hEncoder;
-    BYTE* pbAACBuffer;
-    FILE* fpOut;
-}MPEGTS_HANDLER;
 MPEGTS_HANDLER  gMpegTsHandler;
+static hls_media_t* gHLS = NULL;
+static hls_m3u8_t* gM3U8 = NULL;
 
-// void mpegTsInputMulaw(void *data, size_t bytes){
+#define H264_SPS 7
+#define H264_IDR 5
+#define MY_HLS_DURATION 3
+
+
+static int hls_handler(void* m3u8, const void* data, size_t bytes, int64_t pts, int64_t dts, int64_t duration)
+{
+    static int i = 0;
+    static char name[128] = {0};
+    static char plist[2 * 1024 * 1024];
+    static int64_t s_dts = -1;
+	int discontinue = -1 != s_dts ? 0 : (dts > s_dts + MY_HLS_DURATION / 2 ? 1 : 0);
+    FILE* fp;
+
+	s_dts = dts;
+
+    sprintf(name, "%d.ts", i);
+    hls_m3u8_add((hls_m3u8_t*)m3u8, name, pts, duration, discontinue);
     
-//     int nRet = faacEncEncode(gMpegTsHandler.hEncoder, (int*) pbPCMBuffer, 8000, gMpegTsHandler.pbAACBuffer, nMaxOutputBytes);
-//     int fRet = fwrite(gMpegTsHandler.pbAACBuffer, 1, nRet, fpOut);
-//     printf("%d: faacEncEncode returns %d, fRet:%d\n", i, nRet, fRet);
-// }
+    sprintf(name, "/home/ubuntu/s3/doorbell/test/hls/%d.ts", i++);
+    fp = fopen(name, "wb");
+    fwrite(data, 1, bytes, fp);
+    fclose(fp);
 
-// void mpegTsInputH264(void *data, size_t bytes){
+    hls_m3u8_playlist((hls_m3u8_t*)m3u8, 0, plist, sizeof(plist));
+    fp = fopen("/home/ubuntu/s3/doorbell/test/hls/index.m3u8", "wb");
+    fwrite(plist, 1, strlen(plist), fp);
+    fclose(fp);
 
-// }
+    fprintf(stderr,"%s\n", plist);
 
-void initMpegTs(){
-    test();
+	return 0;
 }
 
-void test(){
+static int aac_handler(int64_t pts, int64_t dts, void* data, size_t bytes){
+    hls_media_input(gHLS, STREAM_AUDIO_AAC, data, bytes, pts, pts, 0);
+}
 
-    ULONG nSampleRate = 8000;  // 采样率
-    UINT nChannels = 1;         // 声道数
-    UINT nPCMBitSize = 16;      // 单样本位数
-    ULONG nInputSamples = 0;
-    ULONG nMaxOutputBytes = 0;
+static int h264_handler(int64_t pts, int64_t dts, void* data, size_t bytes, int flags){
+    hls_media_input(gHLS, STREAM_VIDEO_H264, data, bytes, pts, pts, flags ? HLS_FLAGS_KEYFRAME : 0);
+}
 
-    int nRet;
-    faacEncHandle hEncoder;
-    faacEncConfigurationPtr pConfiguration; 
-
-    int nBytesRead;
-    int nPCMBufferSize;
-    int nULAWBufferSize;
-    BYTE* pbULAWBuffer;
-    BYTE* pbPCMBuffer;
-    BYTE* pbAACBuffer;
-
-    const char* INPUT_PATH = "/home/ubuntu/libraries/doorbell-gateway/src/media-server/native/src/music.mulaw";
-    const char* OUTPUT_PATH = "/home/ubuntu/s3/doorbell/test/out.aac";
-
-    FILE* fpIn; // PCM file for input
-    FILE* fpOut; // AAC file for output
-
-    fpIn = fopen(INPUT_PATH, "rb");
-    if(fpIn == NULL){
-        fprintf(stderr," Open %s failed\n", INPUT_PATH);
-        exit(-1);
+static int isKeyFrame(unsigned char *ptr){
+    const static unsigned char startByte[4] = {0,0,0,1};
+    unsigned char NALU = 0;
+    if(memcmp(ptr,startByte, 4) == 0){
+        NALU = (ptr[4]&0x1f);
+    }else if(memcmp(ptr,startByte+1, 3) == 0){
+         NALU = (ptr[3]&0x1f);
+    }else{
+        fprintf(stderr,"Not H264 StartByte: %02d %02d %02d %02d\n", ptr[0], ptr[1],ptr[2],ptr[3]);
+        return -1;
     }
+    return (NALU == H264_SPS || NALU == H264_IDR) ? 1 : 0;
+}
 
-    fpOut = fopen(OUTPUT_PATH, "wb");
-    if(fpOut == NULL){
-        fprintf(stderr," Open %s error\n", OUTPUT_PATH);
-        exit(-1);
-    }
+static void initFaacHandler(MPEGTS_HANDLER *hander, ULONG nSampleRate, UINT nChannels,UINT nPCMBitSize){
 
-    // (1) Open FAAC engine
-    hEncoder = faacEncOpen(nSampleRate, nChannels, &nInputSamples, &nMaxOutputBytes);
-    if(hEncoder == NULL){
+    hander->nInputSamples = 0;
+    hander->nMaxOutputBytes = 0;
+    
+    hander->hEncoder = faacEncOpen(nSampleRate, nChannels, &hander->nInputSamples, &hander->nMaxOutputBytes);
+    if(hander->hEncoder == NULL){
         printf("[ERROR] Failed to call faacEncOpen()\n");
-        exit(-1);
+        assert(0);
     }
 
-    nPCMBufferSize = nInputSamples * nPCMBitSize / 8;
-    nULAWBufferSize = nPCMBufferSize /2;
-    pbPCMBuffer = (BYTE *)malloc(nPCMBufferSize);//new BYTE [nPCMBufferSize];
-    pbULAWBuffer = (BYTE *)malloc(nULAWBufferSize);
-    pbAACBuffer = (BYTE *)malloc(nMaxOutputBytes);//new BYTE [nMaxOutputBytes];
+    hander->nPCMBufferSize = hander->nInputSamples *  nPCMBitSize / 8;
+    hander->pbPCMBuffer = (BYTE *)malloc(hander->nPCMBufferSize);
+    hander->pbAACBuffer = (BYTE *)malloc(hander->nMaxOutputBytes);
+    hander->nPCMBytesRead = 0;
 
-    // (2.1) Get current encoding configuration
-    pConfiguration = faacEncGetCurrentConfiguration(hEncoder);
+    faacEncConfigurationPtr pConfiguration = faacEncGetCurrentConfiguration(hander->hEncoder);
     pConfiguration->inputFormat = FAAC_INPUT_16BIT;
+    faacEncSetConfiguration(hander->hEncoder, pConfiguration);
+}
 
-    // (2.2) Set encoding configuration
-    nRet = faacEncSetConfiguration(hEncoder, pConfiguration);
-    for(int i = 0; 1; i++){
-        int readByte = fread(pbULAWBuffer, 1, nULAWBufferSize, fpIn);
-        nBytesRead = 0;
-        for(int n=0;n<readByte;n++){
-            int16_t data = MuLaw_Decode(pbULAWBuffer[n]);
-            memcpy(pbPCMBuffer+nBytesRead, &data, 2);
-            nBytesRead += 2;
+void hlsInputH264(int64_t pts, int64_t dts, void* data, size_t bytes){
+    h264_handler(pts, dts, data, bytes, isKeyFrame(data));
+}
+
+void hlsInputUlaw(int64_t pts, int64_t dts, int8_t* data, size_t bytes){
+    
+    for(int i=0;i<bytes;i++){
+        int16_t pcm16le = MuLaw_Decode(data[i]);
+        memcpy(gMpegTsHandler.pbPCMBuffer+gMpegTsHandler.nPCMBytesRead, &pcm16le, 2);
+        gMpegTsHandler.nPCMBytesRead += 2;
+        
+        if(gMpegTsHandler.nPCMBytesRead >= gMpegTsHandler.nPCMBufferSize){
+            int nRet = faacEncEncode(gMpegTsHandler.hEncoder, (int*) gMpegTsHandler.pbPCMBuffer, gMpegTsHandler.nInputSamples, gMpegTsHandler.pbAACBuffer, gMpegTsHandler.nMaxOutputBytes);
+            if(nRet > 0) aac_handler(pts, dts,gMpegTsHandler.pbAACBuffer, nRet);
+            gMpegTsHandler.nPCMBytesRead = 0;
         }
-
-        // // 输入样本数，用实际读入字节数计算，一般只有读到文件尾时才不是nPCMBufferSize/(nPCMBitSize/8);
-        nInputSamples = nBytesRead / (nPCMBitSize / 8);
-        printf("nInputSamples = %d\n", nInputSamples);
-
-        // // (3) Encode
-        nRet = faacEncEncode(hEncoder, (int*) pbPCMBuffer, nInputSamples, pbAACBuffer, nMaxOutputBytes);
-        fwrite(pbAACBuffer, 1, nRet, fpOut);
-        printf("%d: faacEncEncode returns %d\n", i, nRet);
-        if(nBytesRead <= 0) break;
     }
+}
 
-    // (4) Close FAAC engine
-    nRet = faacEncClose(hEncoder);
-
-    free(pbPCMBuffer);
-    free(pbAACBuffer);
-    fclose(fpIn);
-    fclose(fpOut);
-
-    printf("\n Convert done\n");
-
-    return 0;
-
+void initHls(){
+    initFaacHandler(&gMpegTsHandler, 8000, 1, 16);
+    gM3U8 = hls_m3u8_create(0, 3);
+	gHLS = hls_media_create(MY_HLS_DURATION * 1000, hls_handler, gM3U8);
 }
