@@ -22,5 +22,6 @@ void initHls();
 void stopHls();
 void hlsInputH264(int64_t pts, int64_t dts, void* data, size_t bytes);
 void hlsInputUlaw(int64_t pts, int64_t dts, int8_t* data, size_t bytes);
+void hlsMixUlaw(int64_t pts, int64_t dts, int8_t* data1, size_t bytes1, int8_t* data2, size_t bytes2);
 
 #endif

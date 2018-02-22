@@ -44,8 +44,6 @@ static int hls_handler(void* m3u8, const void* data, size_t bytes, int64_t pts, 
     fwrite(plist, 1, strlen(plist), fp);
     fclose(fp);
 
-    // fprintf(stderr,"%s\n", plist);
-
 	return 0;
 }
 
@@ -92,8 +90,26 @@ static void initFaacHandler(MPEGTS_HANDLER *hander, ULONG nSampleRate, UINT nCha
     faacEncSetConfiguration(hander->hEncoder, pConfiguration);
 }
 
+static handleAACBuffer(int64_t pts, int64_t dts, int16_t *pcm){
+    memcpy(gMpegTsHandler.pbPCMBuffer+gMpegTsHandler.nPCMBytesRead, pcm, 2);
+    gMpegTsHandler.nPCMBytesRead += 2;
+
+    if(gMpegTsHandler.nPCMBytesRead >= gMpegTsHandler.nPCMBufferSize){
+        int nRet = faacEncEncode(gMpegTsHandler.hEncoder, (int*) gMpegTsHandler.pbPCMBuffer, gMpegTsHandler.nInputSamples, gMpegTsHandler.pbAACBuffer, gMpegTsHandler.nMaxOutputBytes);
+        if(nRet > 0) aac_handler(pts, dts,gMpegTsHandler.pbAACBuffer, nRet);
+        gMpegTsHandler.nPCMBytesRead = 0;
+    }
+}
+
 void hlsInputH264(int64_t pts, int64_t dts, void* data, size_t bytes){
     h264_handler(pts, dts, data, bytes, isKeyFrame(data));
+}
+
+void hlsMixUlaw(int64_t pts, int64_t dts, int8_t* data1, size_t bytes1, int8_t* data2, size_t bytes2){
+    for(int i=0;i<bytes1;i++){
+        int16_t pcmMixed = MuLaw_Decode(data1[i]) + ( (bytes2>0 && i<bytes2) ? MuLaw_Decode(data2[i]) : 0 );
+        handleAACBuffer(pts, dts, &pcmMixed);
+    }
 }
 
 void hlsInputUlaw(int64_t pts, int64_t dts, int8_t* data, size_t bytes){
@@ -102,12 +118,7 @@ void hlsInputUlaw(int64_t pts, int64_t dts, int8_t* data, size_t bytes){
         int16_t pcm16le = MuLaw_Decode(data[i]);
         memcpy(gMpegTsHandler.pbPCMBuffer+gMpegTsHandler.nPCMBytesRead, &pcm16le, 2);
         gMpegTsHandler.nPCMBytesRead += 2;
-        
-        if(gMpegTsHandler.nPCMBytesRead >= gMpegTsHandler.nPCMBufferSize){
-            int nRet = faacEncEncode(gMpegTsHandler.hEncoder, (int*) gMpegTsHandler.pbPCMBuffer, gMpegTsHandler.nInputSamples, gMpegTsHandler.pbAACBuffer, gMpegTsHandler.nMaxOutputBytes);
-            if(nRet > 0) aac_handler(pts, dts,gMpegTsHandler.pbAACBuffer, nRet);
-            gMpegTsHandler.nPCMBytesRead = 0;
-        }
+        handleAACBuffer(pts, dts, &pcm16le);
     }
 }
 

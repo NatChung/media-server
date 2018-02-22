@@ -12,11 +12,12 @@
 #include "hls_handler.h"
 #include "mpeg-ts.h"
 #include "mpeg-ts-proto.h"
-#include "pipe_handler.h"
 #include "socket_handler.h"
+#include "circular_queue.h"
 
 #define RECV_BUFFER_SIZE 32768
 #define TS_PACKET_SIZE 188
+#define ULAW_PACKET_SIZE 800
 
 unsigned short gAudioPort = 0;
 unsigned short gVideoPort = 0;
@@ -34,16 +35,20 @@ uint32_t createAudioTimestamp(RTP_HANDLER *rtpHandler, size_t bytes){
     return rtpHandler->audioTimestamp;
 }
 
+
 static void ts_packet(void* param, int avtype, int64_t pts, int64_t dts, void* data, size_t bytes)
 {
     RTP_HANDLER *rtpHandler = (RTP_HANDLER *)param;
+    
     if(avtype == PSI_STREAM_PRIVATE_DATA){
+        static char data2[1024];
+        int byte2 = circularDeQueue(data2);
+        hlsMixUlaw(pts/90, pts/90, data, bytes, data2, byte2);
         rtp_payload_encode_input(rtpHandler->audioEncoder, data, bytes, createAudioTimestamp(rtpHandler, bytes));
-        hlsInputUlaw(pts/90, pts/90, data, bytes);
     }
     else if(avtype == PSI_STREAM_H264){
-        rtp_payload_encode_input(rtpHandler->videoEncoder, data, bytes, createVideoTimestamp(rtpHandler, pts));
         hlsInputH264(pts/90, pts/90, data, bytes);
+        rtp_payload_encode_input(rtpHandler->videoEncoder, data, bytes, createVideoTimestamp(rtpHandler, pts));
     }
 }
 
@@ -95,6 +100,7 @@ int main(int argc, char *argv[]){
     signal(SIGHUP, sigroutine); 
     signal(SIGINT, sigroutine);
     signal(SIGQUIT, sigroutine);
+    signal(SIGABRT, sigroutine);
 
     initHls();
     initRtpHandler(&rtpHandler);
@@ -124,8 +130,9 @@ int main(int argc, char *argv[]){
             mpeg_ts_packet_dec(rxData, TS_PACKET_SIZE, ts_packet, &rtpHandler);
         }
         else if (FD_ISSET(sock2wayFd, &rfds)){
-            rlen = recv(sock2wayFd, rxData, RECV_BUFFER_SIZE, 0);
+            rlen = recv(sock2wayFd, rxData, ULAW_PACKET_SIZE, 0);
             if(rlen <= 0) continue;
+            circularEnQueue(rxData, rlen);
         }
     }
 
