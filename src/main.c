@@ -4,29 +4,24 @@
 #include <string.h>
 #include <sys/time.h>
 #include <arpa/inet.h>
-#include<sys/time.h>
+#include <assert.h>
+#include <sys/select.h>
+#include <signal.h>
 
 #include "rtp_handler.h"
 #include "hls_handler.h"
 #include "mpeg-ts.h"
 #include "mpeg-ts-proto.h"
 #include "pipe_handler.h"
+#include "socket_handler.h"
 
 #define RECV_BUFFER_SIZE 32768
 #define TS_PACKET_SIZE 188
 
 unsigned short gAudioPort = 0;
 unsigned short gVideoPort = 0;
-long long startTime = 0;
-
-extern int open_udp_server_socket(int *local_port);
-
-int64_t gettime_ms(void)
-{
-    struct timeval tv;
-    gettimeofday(&tv,NULL);
-    return (int64_t)tv.tv_sec * 1000 + (tv.tv_usec / 1000);
-}
+unsigned short gSourcePort = 0;
+unsigned short g2WayAudioPort = 0;
 
 uint32_t createVideoTimestamp(RTP_HANDLER *rtpHandler, int64_t pts){
     rtpHandler->videoTimestamp += pts - rtpHandler->videoLastPts;
@@ -44,13 +39,11 @@ static void ts_packet(void* param, int avtype, int64_t pts, int64_t dts, void* d
     RTP_HANDLER *rtpHandler = (RTP_HANDLER *)param;
     if(avtype == PSI_STREAM_PRIVATE_DATA){
         rtp_payload_encode_input(rtpHandler->audioEncoder, data, bytes, createAudioTimestamp(rtpHandler, bytes));
-        // hlsInputUlaw(pts/90, pts/90, data, bytes);
-        sendAudioPipe(data, bytes);
+        hlsInputUlaw(pts/90, pts/90, data, bytes);
     }
     else if(avtype == PSI_STREAM_H264){
         rtp_payload_encode_input(rtpHandler->videoEncoder, data, bytes, createVideoTimestamp(rtpHandler, pts));
-        // hlsInputH264(pts/90, pts/90, data, bytes);
-        sendVideoPipe(data, bytes);
+        hlsInputH264(pts/90, pts/90, data, bytes);
     }
 }
 
@@ -65,12 +58,24 @@ int usage(int argc, char *argv[]){
         else if(strcmp(parameter, "-v") == 0){
             gVideoPort = atoi(argv[i+1]);
         }
+        else if(strcmp(parameter, "-s") == 0){
+            gSourcePort = atoi(argv[i+1]);
+        }
+        else if(strcmp(parameter, "-2") == 0){
+            g2WayAudioPort = atoi(argv[i+1]);
+        }
     }
 
-    if(gAudioPort == 0 || gVideoPort == 0){
-        printf("Command Error !\nUsage: command -a [RTP audio target port] -v [RTP video target port]\n");
+    if(gAudioPort == 0 || gVideoPort == 0 || gSourcePort == 0 || g2WayAudioPort == 0){
+        printf("Command Error !\nUsage: command -s [MpegTs source port/TCP] -2 [2Way audio source port/TCP] -a [RTP audio target port] -v [RTP video target port]\n");
         exit(0);
     }
+}
+
+volatile sig_atomic_t runing = 1;
+void sigroutine(int sig){
+    stopHls();
+    runing = 0;
 }
 
 int main(int argc, char *argv[]){
@@ -82,28 +87,50 @@ int main(int argc, char *argv[]){
     int rlen, tsCount;
     int localPort = 0;
     struct rtp_payload_t audioHandler, videoHandler;
+    int sockSourcefd = -1, sock2wayFd = -1, fdMax = -1;
+    fd_set rfds;
+    struct timeval tv;
 
     usage(argc, argv);
+    signal(SIGHUP, sigroutine); 
+    signal(SIGINT, sigroutine);
+    signal(SIGQUIT, sigroutine);
 
-    initPipe("/tmp");
-    // initHls();
+    initHls();
     initRtpHandler(&rtpHandler);
     initAudioHandler(&audioHandler, &rtpHandler);
     initVideoHandler(&videoHandler, &rtpHandler);
 
     rtpHandler.fd = open_udp_server_socket(&localPort);
-    if(rtpHandler.fd <=0){
-        fprintf(stderr,"Create mpeg ts source socket failed");
-        exit(0);
-    }
-    fprintf(stderr, "{\"listen\":%d}", localPort);//Must keep here for parent node js to get localPort
-    while(1){
-        rlen = recvfrom(rtpHandler.fd, rxData, RECV_BUFFER_SIZE, 0, from, &fromLen);
-        if(rlen <= 0) continue;
-        for(int i=0;i<(rlen/TS_PACKET_SIZE);i++){
-            mpeg_ts_packet_dec(rxData +(i*TS_PACKET_SIZE), TS_PACKET_SIZE, ts_packet, &rtpHandler);
+    sockSourcefd = connect_tcp_server_socket(gSourcePort);
+    sock2wayFd = connect_tcp_server_socket(g2WayAudioPort);
+    fdMax = (sockSourcefd > sock2wayFd) ? sockSourcefd : sock2wayFd;
+
+    while (runing) {
+        tv.tv_sec = 1; 
+        tv.tv_usec = 0;
+
+        FD_ZERO(&rfds);
+        FD_SET(sockSourcefd, &rfds);
+        FD_SET(sock2wayFd, &rfds);
+
+        select(fdMax + 5, &rfds, NULL, NULL, &tv);
+        if(runing ==0) break;
+
+        if (FD_ISSET(sockSourcefd, &rfds)){
+            rlen = recv(sockSourcefd, rxData, TS_PACKET_SIZE, 0);
+            if(rlen <= 0) continue;
+            assert(rlen == TS_PACKET_SIZE);
+            mpeg_ts_packet_dec(rxData, TS_PACKET_SIZE, ts_packet, &rtpHandler);
+        }
+        else if (FD_ISSET(sock2wayFd, &rfds)){
+            rlen = recv(sock2wayFd, rxData, RECV_BUFFER_SIZE, 0);
+            if(rlen <= 0) continue;
         }
     }
+
+    close(sock2wayFd);
+    close(sockSourcefd);
 
     return 0;
 }

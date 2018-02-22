@@ -9,6 +9,7 @@
 #include "hls-media.h"
 #include "hls-param.h"
 #include "mpeg-ps.h"
+#include "g711.h"
 
 MPEGTS_HANDLER  gMpegTsHandler;
 static hls_media_t* gHLS = NULL;
@@ -43,7 +44,7 @@ static int hls_handler(void* m3u8, const void* data, size_t bytes, int64_t pts, 
     fwrite(plist, 1, strlen(plist), fp);
     fclose(fp);
 
-    fprintf(stderr,"%s\n", plist);
+    // fprintf(stderr,"%s\n", plist);
 
 	return 0;
 }
@@ -114,4 +115,17 @@ void initHls(){
     initFaacHandler(&gMpegTsHandler, 8000, 1, 16);
     gM3U8 = hls_m3u8_create(0, 3);
 	gHLS = hls_media_create(MY_HLS_DURATION * 1000, hls_handler, gM3U8);
+}
+
+void stopHls(){
+    static char data[2 * 1024 * 1024];
+    
+    hls_media_input(gHLS, 0, NULL, 0, 0, 0, 0);
+	hls_m3u8_playlist(gM3U8, 1, data, sizeof(data));
+	FILE* fp = fopen("/home/ubuntu/s3/doorbell/test/hls/index.m3u8", "wb");
+	fwrite(data, 1, strlen(data), fp);
+	fclose(fp);
+    
+    hls_media_destroy(gHLS);
+	hls_m3u8_destroy(gM3U8);
 }
