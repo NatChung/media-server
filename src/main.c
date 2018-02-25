@@ -23,6 +23,7 @@ unsigned short gAudioPort = 0;
 unsigned short gVideoPort = 0;
 unsigned short gSourcePort = 0;
 unsigned short g2WayAudioPort = 0;
+char gRecordPath[512] = {0};
 
 uint32_t createVideoTimestamp(RTP_HANDLER *rtpHandler, int64_t pts){
     rtpHandler->videoTimestamp += pts - rtpHandler->videoLastPts;
@@ -69,9 +70,12 @@ int usage(int argc, char *argv[]){
         else if(strcmp(parameter, "-2") == 0){
             g2WayAudioPort = atoi(argv[i+1]);
         }
+        else if(strcmp(parameter, "-p") == 0){
+            strcpy(gRecordPath, argv[i+1]);
+        }
     }
 
-    if(gAudioPort == 0 || gVideoPort == 0 || gSourcePort == 0 || g2WayAudioPort == 0){
+    if(gAudioPort == 0 || gVideoPort == 0 || gSourcePort == 0 || g2WayAudioPort == 0 || strlen(gRecordPath) == 0){
         printf("Command Error !\nUsage: command -s [MpegTs source port/TCP] -2 [2Way audio source port/TCP] -a [RTP audio target port] -v [RTP video target port]\n");
         exit(0);
     }
@@ -102,7 +106,7 @@ int main(int argc, char *argv[]){
     signal(SIGQUIT, sigroutine);
     signal(SIGABRT, sigroutine);
 
-    initHls();
+    initHls(gRecordPath);
     initRtpHandler(&rtpHandler);
     initAudioHandler(&audioHandler, &rtpHandler);
     initVideoHandler(&videoHandler, &rtpHandler);

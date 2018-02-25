@@ -15,16 +15,17 @@ FILE *outTs;
 MPEGTS_HANDLER  gMpegTsHandler;
 static hls_media_t* gHLS = NULL;
 static hls_m3u8_t* gM3U8 = NULL;
+static char *gPath = NULL;
 
 #define H264_SPS 7
 #define H264_IDR 5
-#define MY_HLS_DURATION HLS_DURATION
+#define MY_HLS_DURATION 5
 
 
 static int hls_handler(void* m3u8, const void* data, size_t bytes, int64_t pts, int64_t dts, int64_t duration)
 {
     static int i = 0;
-    static char name[128] = {0};
+    static char name[512] = {0};
     static char plist[2 * 1024 * 1024];
     static int64_t s_dts = -1;
 	int discontinue = -1 != s_dts ? 0 : (dts > s_dts + MY_HLS_DURATION / 2 ? 1 : 0);
@@ -35,15 +36,18 @@ static int hls_handler(void* m3u8, const void* data, size_t bytes, int64_t pts, 
     sprintf(name, "%d.ts", i);
     hls_m3u8_add((hls_m3u8_t*)m3u8, name, pts, duration, discontinue);
     
-    sprintf(name, "/home/ubuntu/s3/doorbell/test/hls/%d.ts", i++);
+    sprintf(name, "%s/%d.ts", gPath, i++);
     fp = fopen(name, "wb");
     fwrite(data, 1, bytes, fp);
     fclose(fp);
+    // printf("TS:%s\n", name);
 
     hls_m3u8_playlist((hls_m3u8_t*)m3u8, 0, plist, sizeof(plist));
-    fp = fopen("/home/ubuntu/s3/doorbell/test/hls/index.m3u8", "wb");
-    fwrite(plist, 1, strlen(plist), fp);
-    fclose(fp);
+    // sprintf(name, "%s/index.m3u8", gPath);
+    // fp = fopen(name, "wb");
+    // fwrite(plist, 1, strlen(plist), fp);
+    // fclose(fp);
+    // printf("M3U8:%s\n", name);
 
     fwrite(data, 2, bytes/2, outTs);
 
@@ -125,10 +129,18 @@ void hlsInputUlaw(int64_t pts, int64_t dts, int8_t* data, size_t bytes){
     }
 }
 
-void initHls(){
+void initOutTs(){
+    char outTsFileName[512];
+    sprintf(outTsFileName, "%s/out.ts", gPath);
+    outTs = fopen(outTsFileName, "wb");
+    assert(outTs!=NULL);
+    // printf("OUTTS:%s\n", outTsFileName);
+}
 
-    outTs = fopen("/home/ubuntu/s3/doorbell/test/hls/out.ts", "wb");
-   
+void initHls(char *recordingPath){
+    gPath = recordingPath; printf("InitHLS Path:%s\n", gPath);
+
+    initOutTs();
     initFaacHandler(&gMpegTsHandler, 8000, 1, 16);
     gM3U8 = hls_m3u8_create(0, 3);
 	gHLS = hls_media_create(MY_HLS_DURATION * 1000, hls_handler, gM3U8);
@@ -136,10 +148,13 @@ void initHls(){
 
 void stopHls(){
     static char data[2 * 1024 * 1024];
-    
+    char command[1024], m3u8Path[512];
+
     hls_media_input(gHLS, 0, NULL, 0, 0, 0, 0);
 	hls_m3u8_playlist(gM3U8, 1, data, sizeof(data));
-	FILE* fp = fopen("/home/ubuntu/s3/doorbell/test/hls/index.m3u8", "wb");
+    sprintf(m3u8Path, "%s/index.m3u8", gPath);
+    // printf("M3U8:%s", m3u8Path);
+	FILE* fp = fopen(m3u8Path, "wb");
 	fwrite(data, 1, strlen(data), fp);
 	fclose(fp);
 
@@ -147,5 +162,7 @@ void stopHls(){
 	hls_m3u8_destroy(gM3U8);
 
     fclose(outTs);
-    system("ffmpeg -i /home/ubuntu/s3/doorbell/test/hls/out.ts -codec copy -bsf:a aac_adtstoasc /home/ubuntu/s3/doorbell/test/hls/index.mp4 -y");
+    sprintf(command, "ffmpeg -i %s/out.ts -codec copy -bsf:a aac_adtstoasc %s/index.mp4 -y", gPath, gPath);
+    // printf("Final command: %s\n\n", command);
+    system(command);
 }
