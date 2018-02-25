@@ -79,8 +79,8 @@ int usage(int argc, char *argv[]){
 
 volatile sig_atomic_t runing = 1;
 void sigroutine(int sig){
-    stopHls();
     runing = 0;
+    stopHls();
 }
 
 int main(int argc, char *argv[]){

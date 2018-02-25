@@ -11,13 +11,14 @@
 #include "mpeg-ps.h"
 #include "g711.h"
 
+FILE *outTs;
 MPEGTS_HANDLER  gMpegTsHandler;
 static hls_media_t* gHLS = NULL;
 static hls_m3u8_t* gM3U8 = NULL;
 
 #define H264_SPS 7
 #define H264_IDR 5
-#define MY_HLS_DURATION 3
+#define MY_HLS_DURATION HLS_DURATION
 
 
 static int hls_handler(void* m3u8, const void* data, size_t bytes, int64_t pts, int64_t dts, int64_t duration)
@@ -43,6 +44,8 @@ static int hls_handler(void* m3u8, const void* data, size_t bytes, int64_t pts, 
     fp = fopen("/home/ubuntu/s3/doorbell/test/hls/index.m3u8", "wb");
     fwrite(plist, 1, strlen(plist), fp);
     fclose(fp);
+
+    fwrite(data, 2, bytes/2, outTs);
 
 	return 0;
 }
@@ -123,6 +126,9 @@ void hlsInputUlaw(int64_t pts, int64_t dts, int8_t* data, size_t bytes){
 }
 
 void initHls(){
+
+    outTs = fopen("/home/ubuntu/s3/doorbell/test/hls/out.ts", "wb");
+   
     initFaacHandler(&gMpegTsHandler, 8000, 1, 16);
     gM3U8 = hls_m3u8_create(0, 3);
 	gHLS = hls_media_create(MY_HLS_DURATION * 1000, hls_handler, gM3U8);
@@ -136,7 +142,10 @@ void stopHls(){
 	FILE* fp = fopen("/home/ubuntu/s3/doorbell/test/hls/index.m3u8", "wb");
 	fwrite(data, 1, strlen(data), fp);
 	fclose(fp);
-    
+
     hls_media_destroy(gHLS);
 	hls_m3u8_destroy(gM3U8);
+
+    fclose(outTs);
+    system("ffmpeg -i /home/ubuntu/s3/doorbell/test/hls/out.ts -codec copy -bsf:a aac_adtstoasc /home/ubuntu/s3/doorbell/test/hls/index.mp4 -y");
 }
