@@ -9,11 +9,10 @@
 #include <signal.h>
 
 #include "rtp_handler.h"
-#include "hls_handler.h"
-#include "mpeg-ts.h"
 #include "mpeg-ts-proto.h"
 #include "socket_handler.h"
 #include "circular_queue.h"
+#include "vtt_handler.h"
 
 #define RECV_BUFFER_SIZE 32768
 #define TS_PACKET_SIZE 188
@@ -24,6 +23,7 @@ unsigned short gVideoPort = 0;
 unsigned short gSourcePort = 0;
 unsigned short g2WayAudioPort = 0;
 char gRecordPath[512] = {0};
+char gRecordImagePath[512] = {0};
 
 uint32_t createVideoTimestamp(RTP_HANDLER *rtpHandler, int64_t pts){
     rtpHandler->videoTimestamp += pts - rtpHandler->videoLastPts;
@@ -72,11 +72,12 @@ int usage(int argc, char *argv[]){
         }
         else if(strcmp(parameter, "-p") == 0){
             strcpy(gRecordPath, argv[i+1]);
+            sprintf(gRecordImagePath, "%s/images", gRecordPath);
         }
     }
 
     if(gAudioPort == 0 || gVideoPort == 0 || gSourcePort == 0 || g2WayAudioPort == 0 || strlen(gRecordPath) == 0){
-        printf("Command Error !\nUsage: command -s [MpegTs source port/TCP] -2 [2Way audio source port/TCP] -a [RTP audio target port] -v [RTP video target port]\n");
+        printf("Command Error !\nUsage: command -s [MpegTs source port/TCP] -2 [2Way audio source port/TCP] -a [RTP audio target port] -v [RTP video target port] -p [Recording path]\n");
         exit(0);
     }
 }
@@ -85,6 +86,7 @@ volatile sig_atomic_t runing = 1;
 void sigroutine(int sig){
     runing = 0;
     stopHls();
+    createVttFie(gRecordPath, gRecordImagePath);
 }
 
 int main(int argc, char *argv[]){
@@ -106,7 +108,7 @@ int main(int argc, char *argv[]){
     signal(SIGQUIT, sigroutine);
     signal(SIGABRT, sigroutine);
 
-    initHls(gRecordPath);
+    initHls(gRecordPath, gRecordImagePath);
     initRtpHandler(&rtpHandler);
     initAudioHandler(&audioHandler, &rtpHandler);
     initVideoHandler(&videoHandler, &rtpHandler);

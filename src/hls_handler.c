@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <string.h>
 #include <inttypes.h>  
+#include <sys/stat.h> // mkdir
 
 #include "hls_handler.h"
 #include "hls-m3u8.h"
@@ -16,6 +17,8 @@ MPEGTS_HANDLER  gMpegTsHandler;
 static hls_media_t* gHLS = NULL;
 static hls_m3u8_t* gM3U8 = NULL;
 static char *gPath = NULL;
+static char *gImagePath = NULL;
+static int gInotify = 1;
 
 #define H264_SPS 7
 #define H264_IDR 5
@@ -130,21 +133,29 @@ void hlsInputUlaw(int64_t pts, int64_t dts, int8_t* data, size_t bytes){
 }
 
 void initOutTs(){
+    
     char outTsFileName[512];
     sprintf(outTsFileName, "%s/out.ts", gPath);
     outTs = fopen(outTsFileName, "wb");
     assert(outTs!=NULL);
-    // printf("OUTTS:%s\n", outTsFileName);
 }
 
-void initHls(char *recordingPath){
-    gPath = recordingPath; printf("InitHLS Path:%s\n", gPath);
 
-    initOutTs();
+void initHls(char *recordingPath, char *imagePath){
+
+    gPath = recordingPath; 
+    gImagePath = imagePath;
+
+    assert(mkdir(imagePath, 0777) != -1);
+    printf("InitHLS Path:%s\n", gPath);
+
+    initOutTs(recordingPath);
     initFaacHandler(&gMpegTsHandler, 8000, 1, 16);
     gM3U8 = hls_m3u8_create(0, 3);
 	gHLS = hls_media_create(MY_HLS_DURATION * 1000, hls_handler, gM3U8);
 }
+
+
 
 void stopHls(){
     static char data[2 * 1024 * 1024];
@@ -153,16 +164,18 @@ void stopHls(){
     hls_media_input(gHLS, 0, NULL, 0, 0, 0, 0);
 	hls_m3u8_playlist(gM3U8, 1, data, sizeof(data));
     sprintf(m3u8Path, "%s/index.m3u8", gPath);
-    // printf("M3U8:%s", m3u8Path);
 	FILE* fp = fopen(m3u8Path, "wb");
 	fwrite(data, 1, strlen(data), fp);
 	fclose(fp);
 
+    
     hls_media_destroy(gHLS);
 	hls_m3u8_destroy(gM3U8);
 
     fclose(outTs);
-    sprintf(command, "ffmpeg -i %s/out.ts -codec copy -bsf:a aac_adtstoasc %s/index.mp4 -y", gPath, gPath);
-    // printf("Final command: %s\n\n", command);
+    sprintf(command, "ffmpeg -i %s/out.ts -codec copy -bsf:a aac_adtstoasc %s/index.mp4 -y -vf fps=1/2 %s/%%d.jpg", gPath, gPath, gImagePath);
     system(command);
+
+    gInotify = 0;
 }
+

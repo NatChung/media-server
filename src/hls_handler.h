@@ -18,7 +18,7 @@ typedef struct{
     BYTE* pbAACBuffer;
 }MPEGTS_HANDLER;
 
-void initHls(char *recordingPath);
+void initHls(char *recordingPath, char *imagePath);
 void stopHls();
 void hlsInputH264(int64_t pts, int64_t dts, void* data, size_t bytes);
 void hlsInputUlaw(int64_t pts, int64_t dts, int8_t* data, size_t bytes);
