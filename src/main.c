@@ -132,7 +132,8 @@ int main(int argc, char *argv[]){
         if (FD_ISSET(sockSourcefd, &rfds)){
             rlen = recv(sockSourcefd, rxData, TS_PACKET_SIZE, 0);
             if(rlen <= 0) continue;
-            assert(rlen == TS_PACKET_SIZE);
+            if(rlen != TS_PACKET_SIZE) continue;
+            
             mpeg_ts_packet_dec(rxData, TS_PACKET_SIZE, ts_packet, &rtpHandler);
         }
         else if (FD_ISSET(sock2wayFd, &rfds)){
