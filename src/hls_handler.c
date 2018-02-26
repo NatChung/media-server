@@ -173,7 +173,7 @@ void stopHls(){
 	hls_m3u8_destroy(gM3U8);
 
     fclose(outTs);
-    sprintf(command, "ffmpeg -i %s/out.ts -codec copy -bsf:a aac_adtstoasc %s/index.mp4 -y -vf fps=1/2 %s/%%d.jpg", gPath, gPath, gImagePath);
+    sprintf(command, "ffmpeg -i %s/out.ts -codec copy -bsf:a aac_adtstoasc %s/index.mp4 -y -vf fps=1/2 %s/%%d.jpg -hide_banner", gPath, gPath, gImagePath);
     system(command);
 
     gInotify = 0;
